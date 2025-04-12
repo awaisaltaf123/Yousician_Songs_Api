@@ -1,94 +1,103 @@
 from flask import Blueprint, jsonify, request
 from mongoengine import Q
-from app.models import Song
-from app.config import Config
 from bson import ObjectId
 from statistics import mean
+from app.models import Song
+from app.config import AppConfig
 
-api = Blueprint('api', __name__)
+songs_api = Blueprint('songs_api', __name__)
 
-@api.route('/songs', methods=['GET'])
-def list_songs():
-    """Returns a paginated list of songs."""
-    page = int(request.args.get('page', 1))
-    per_page = int(request.args.get('per_page', Config.PAGE_SIZE))
-    skip = (page - 1) * per_page
+@songs_api.route('/songs', methods=['GET'])
+def get_all_songs():
+    """Paginated fetch of song documents."""
+    try:
+        page = int(request.args.get('page', 1))
+        per_page = int(request.args.get('per_page', AppConfig.DEFAULT_PAGE_SIZE))
+    except ValueError:
+        return jsonify({'error': 'Invalid pagination params'}), 400
 
-    songs = Song.objects.skip(skip).limit(per_page)
-    total = Song.objects.count()
+    offset = (page - 1) * per_page
+    results = Song.objects.skip(offset).limit(per_page)
+    total_count = Song.objects.count()
 
     return jsonify({
-        'songs': [song.to_json() for song in songs],
-        'total': total,
+        'songs': [song.to_json() for song in results],
+        'total': total_count,
         'page': page,
         'per_page': per_page
     })
 
-@api.route('/songs/difficulty', methods=['GET'])
-def average_difficulty():
-    """Returns the average difficulty, optionally filtered by level."""
-    level = request.args.get('level')
+
+@songs_api.route('/songs/difficulty', methods=['GET'])
+def get_avg_difficulty():
+    """Compute average difficulty, filtered optionally by level."""
+    level_param = request.args.get('level')
     query = Song.objects
-    if level:
+
+    if level_param:
         try:
-            query = query.filter(level=int(level))
+            level = int(level_param)
+            query = query.filter(game_level=level)
         except ValueError:
-            return jsonify({'error': 'Invalid level parameter'}), 400
+            return jsonify({'error': 'Level must be an integer'}), 400
 
-    difficulties = [song.difficulty for song in query]
-    if not difficulties:
-        return jsonify({'average_difficulty': 0})
+    difficulties = [s.difficulty_score for s in query]
+    avg = round(mean(difficulties), 2) if difficulties else 0
 
-    return jsonify({'average_difficulty': round(mean(difficulties), 2)})
+    return jsonify({'average_difficulty': avg})
 
-@api.route('/songs/search', methods=['GET'])
-def search_songs():
-    """Searches songs by artist or title (case-insensitive)."""
-    message = request.args.get('message')
-    if not message:
-        return jsonify({'error': 'Missing message parameter'}), 400
 
-    query = Q(artist__icontains=message) | Q(title__icontains=message)
-    songs = Song.objects(query)
+@songs_api.route('/songs/search', methods=['GET'])
+def search_song_by_keyword():
+    """Case-insensitive search across artist or title fields."""
+    keyword = request.args.get('message')
+    if not keyword:
+        return jsonify({'error': 'Query parameter "message" is required'}), 400
 
-    return jsonify({'songs': [song.to_json() for song in songs]})
+    search_query = Q(artist_name__icontains=keyword) | Q(song_title__icontains=keyword)
+    results = Song.objects(search_query)
 
-@api.route('/songs/rating', methods=['POST'])
-def add_rating():
-    """Adds a rating to a song."""
-    data = request.get_json()
-    song_id = data.get('song_id')
-    rating = data.get('rating')
+    return jsonify({'songs': [song.to_json() for song in results]})
+
+
+@songs_api.route('/songs/rating', methods=['POST'])
+def submit_rating():
+    """Append a new rating to a song entry."""
+    payload = request.get_json(force=True)
+    song_id = payload.get('song_id')
+    rating = payload.get('rating')
 
     if not song_id or rating is None:
-        return jsonify({'error': 'Missing song_id or rating'}), 400
+        return jsonify({'error': 'song_id and rating are required'}), 400
 
     try:
         rating = int(rating)
-        if rating < 1 or rating > 5:
-            raise ValueError
+        if rating not in range(1, 6):
+            return jsonify({'error': 'Rating must be between 1 and 5'}), 400
     except (ValueError, TypeError):
-        return jsonify({'error': 'Rating must be an integer between 1 and 5'}), 400
+        return jsonify({'error': 'Invalid rating format'}), 400
+
+    song = Song.objects(id=song_id).first()
+    if not song:
+        return jsonify({'error': 'No song found with that ID'}), 404
 
     try:
-        song = Song.objects(id=song_id).first()
-        if not song:
-            return jsonify({'error': 'Song not found'}), 404
-
-        song.ratings.append(rating)
+        song.user_ratings.append(rating)
         song.save()
-        return jsonify({'message': 'Rating added successfully'})
-    except Exception as e:
-        return jsonify({'error': str(e)}), 400
+    except Exception as err:
+        return jsonify({'error': f'Could not save rating: {err}'}), 500
 
-@api.route('/songs/<song_id>/ratings', methods=['GET'])
-def get_ratings(song_id):
-    """Returns average, lowest, and highest rating for a song."""
+    return jsonify({'message': 'Rating submitted successfully'})
+
+
+@songs_api.route('/songs/<song_id>/ratings', methods=['GET'])
+def get_song_ratings(song_id):
+    """Get summary of song's ratings (avg, min, max)."""
     song = Song.objects(id=song_id).first()
     if not song:
         return jsonify({'error': 'Song not found'}), 404
 
-    ratings = song.ratings
+    ratings = song.user_ratings
     if not ratings:
         return jsonify({
             'average_rating': 0,

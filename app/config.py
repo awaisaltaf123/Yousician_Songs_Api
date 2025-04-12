@@ -1,8 +1,11 @@
 import os
 
-class Config:
-    MONGODB_SETTINGS = {
-        'host': os.getenv('MONGO_URI', 'mongodb://localhost:27017/songs_db'),
-        'uuidRepresentation': 'standard'
+class AppConfig:
+    DB_URI = os.environ.get('MONGO_URI', 'mongodb://localhost:27017/songs_db')
+
+    MONGO_CONF = {
+        'host': DB_URI,
+        'uuidRepresentation': 'standard',
     }
-    PAGE_SIZE = 10
+
+    DEFAULT_PAGE_SIZE = 10
