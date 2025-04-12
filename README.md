@@ -55,8 +55,8 @@ The recommended way to run the project is with Docker, which handles MongoDB and
 
 1. **Clone the Repository** (if applicable):
    ```bash
-   git clone <repository-url>
-   cd songs_api
+   git clone https://github.com/awaisaltaf123/Yousician_Songs_Api.git
+   cd Yousician_Songs_Api
    ```
 
 2. **Start Docker Containers**:
@@ -138,7 +138,7 @@ The `songs.json` file in `data/` contains the initial song data. To load it into
 
 3. **Verify Data**:
    ```bash
-   docker exec -it songs_api_mongo_1 mongo
+   docker exec -it yousician_songs_api-mongo-1 mongo
    > use songs_db
    > db.songs.find().pretty()
    ```
